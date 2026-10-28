@@ -99,14 +99,48 @@ params = {
 
 ## **Performance Metrics**
 
-The following table summarizes the performance metrics for each model based on evaluation datasets:
+### Leak-free evaluation (`tempest_fixed.py`)
 
-| **Model**         | **MSE** | **MAE** | **R² Score** |
+The notebook's original evaluation shuffled overlapping 24-hour windows into train and test, and its inputs
+overlapped the hours being predicted, so its scores measured leakage rather than forecasting skill.
+`tempest_fixed.py` re-evaluates the **same data, features and four architectures** properly:
+
+- **Chronological split** with 48-hour gaps: train 2024-02-11 → 2024-11-30, validation → 2025-02-01,
+  test 2025-02-04 → 2025-04-05 (1,417 forecasts).
+- **Forecast from the past only:** inputs are the previous 24 hours (including past temperature); targets are the next 24.
+- Scaler fitted on training data only; early stopping on validation, never on test.
+- A **persistence baseline** ("the next 24 hours repeat the last 24") as the reference.
+
+Test-set mean absolute error, °C (lower is better):
+
+| **Model** | **Predicting temperature** | **Predicting the change from persistence** (`--residual`) |
+|---|---|---|
+| Persistence baseline | 0.94 (R² 0.950) | 0.94 (R² 0.950) |
+| GRU with Attention | 1.64 (R² 0.861) | **0.89 (R² 0.954), 5% better than persistence** |
+| LSTM Encoder-Decoder | 1.75 (R² 0.839) | 0.91 (R² 0.951) |
+| CNN-GRU Hybrid | 1.71 (R² 0.850) | 0.94 (R² 0.947) |
+| Dense Model | 1.89 (R² 0.817) | 0.93 (R² 0.951) |
+
+Predicting raw temperature, no model beats persistence. With residual learning, GRU + Attention does, by about 5%.
+These are single training runs on two months of test data, so treat the margin as indicative.
+
+```bash
+pip install tensorflow pandas numpy scikit-learn openmeteo-requests requests-cache retry-requests
+python tempest_fixed.py --out results.json              # predict temperature directly
+python tempest_fixed.py --residual --out results.json   # predict the change from persistence
+```
+
+### Original notebook figures (leaky, kept for reference)
+
+| **Model** | **MSE** | **MAE** | **R² Score** |
 |-------------------|---------|---------|--------------|
 | GRU with Attention| 1.12    | 0.89    | 0.94         |
 | LSTM Encoder-Decoder | 1.35 | 1.02    | 0.92         |
 | CNN-GRU Hybrid    | 1.28    | 0.97    | 0.93         |
 | Dense Model       | 2.01    | 1.31    | 0.87         |
+
+Re-running the original evaluation for GRU + Attention gives R² 0.959, close to persistence's own 0.950: a high R²
+here mostly reflects how predictable hourly temperature is from the previous day.
 
 ---
 
